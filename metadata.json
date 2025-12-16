@@ -1,0 +1,7 @@
+{
+  "name": "Urban Kanban",
+  "description": "Стильная канбан-доска Urban Kanban с ИИ и голосовым управлением.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
