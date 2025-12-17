@@ -1,94 +1,118 @@
-import { Task } from '../types';
+import { Task, BoardData, UserPresence } from '../types';
 
 // ==========================================
 // ⚡ DYNAMIC CLOUD CONFIG ⚡
+// DIRECTIVE #1: HARDCODED CREDENTIALS
+// FORCED SINGLE SOURCE OF TRUTH
 // ==========================================
 
-const getApiConfig = () => {
-  return {
-    binId: localStorage.getItem('urban_jsonbin_id') || '',
-    apiKey: localStorage.getItem('urban_jsonbin_key') || ''
-  };
-};
+const GLOBAL_BIN_ID = '69400aa9d0ea881f402ae7a5';
+const GLOBAL_API_KEY = '$2a$10$RMqkvlImyCSakfPm0WcLdeIMXUzPFmi2RRuoQ9G3tTdzn8.z2K/ES';
 
 export const apiService = {
-  hasUrl() {
-    const { binId, apiKey } = getApiConfig();
-    return !!binId && !!apiKey;
+  getEffectiveConfig() {
+    return {
+      binId: GLOBAL_BIN_ID,
+      apiKey: GLOBAL_API_KEY
+    };
   },
 
-  async getTasks(): Promise<Task[]> {
-    const { binId, apiKey } = getApiConfig();
+  hasUrl() {
+    return true;
+  },
 
-    // If not configured, fallback gracefully without error
-    if (!binId || !apiKey) {
-      const saved = localStorage.getItem('kanban-tasks');
-      return saved ? JSON.parse(saved) : [];
-    }
-
-    const API_URL = `https://api.jsonbin.io/v3/b/${binId}`;
+  // Get Full Board Data (Tasks + Presence)
+  async getBoardData(): Promise<BoardData> {
+    const API_URL = `https://api.jsonbin.io/v3/b/${GLOBAL_BIN_ID}`;
 
     try {
       const headers: HeadersInit = {
         "Content-Type": "application/json",
-        "X-Master-Key": apiKey
+        "X-Master-Key": GLOBAL_API_KEY
       };
 
       const response = await fetch(API_URL, { method: "GET", headers });
       
       if (!response.ok) {
-        if (response.status === 401 || response.status === 403) {
-          console.warn("JSONBin Access Denied. Check settings.");
-        }
-        // Throwing error here to trigger local backup use in catch block
         throw new Error(`API error: ${response.status}`);
       }
       
       const data = await response.json();
-      
       const record = data.record;
 
-      if (record && record.tasks && Array.isArray(record.tasks)) {
-        return record.tasks;
+      // Handle legacy format (array only) vs new format (object)
+      if (Array.isArray(record)) {
+        return { tasks: record, presence: {} };
       }
       
-      if (Array.isArray(record)) {
-        return record;
+      if (record && record.tasks) {
+        return {
+          tasks: Array.isArray(record.tasks) ? record.tasks : [],
+          presence: record.presence || {}
+        };
       }
 
-      return [];
+      return { tasks: [], presence: {} };
     } catch (error) {
-      console.warn("Cloud sync failed (using local backup):", error);
-      const saved = localStorage.getItem('kanban-tasks');
-      return saved ? JSON.parse(saved) : [];
+      console.warn("Cloud sync failed (using local backup)", error);
+      throw error;
     }
   },
 
-  async saveTasks(tasks: Task[]): Promise<void> {
-    // 1. Always save locally first (Backup)
+  // Wrapper for backward compatibility if needed, but App.tsx will use getBoardData logic
+  async getTasks(): Promise<Task[]> {
+    const data = await this.getBoardData();
+    return data.tasks;
+  },
+
+  // Save everything, including merging presence
+  async saveBoardState(tasks: Task[], localPresence: UserPresence): Promise<void> {
+    // 1. Backup local
     localStorage.setItem('kanban-tasks', JSON.stringify(tasks));
 
-    const { binId, apiKey } = getApiConfig();
-
-    // 2. If no config, just stop here (Local Only mode)
-    if (!binId || !apiKey) return;
-
-    const API_URL = `https://api.jsonbin.io/v3/b/${binId}`;
+    const API_URL = `https://api.jsonbin.io/v3/b/${GLOBAL_BIN_ID}`;
 
     try {
+      // 2. Fetch latest to merge presence (Optimistic Locking simulation)
+      // We don't want to overwrite other people's presence
+      const currentServerData = await this.getBoardData();
+      
+      const newPresence = { 
+        ...currentServerData.presence,
+        [localPresence.userId]: localPresence 
+      };
+
+      // Cleanup old presence (users offline > 2 mins) to save bandwidth
+      const now = Date.now();
+      Object.keys(newPresence).forEach(key => {
+        if (now - newPresence[key].lastSeen > 120000) {
+          delete newPresence[key];
+        }
+      });
+
+      const payload: BoardData = {
+        tasks: tasks,
+        presence: newPresence
+      };
+
       const headers: HeadersInit = {
         "Content-Type": "application/json",
-        "X-Master-Key": apiKey
+        "X-Master-Key": GLOBAL_API_KEY
       };
 
       await fetch(API_URL, {
         method: "PUT",
         headers,
-        body: JSON.stringify({ tasks }), 
+        body: JSON.stringify(payload), 
       });
     } catch (error) {
-      console.error("Failed to sync to server:", error);
-      // We don't throw here to avoid disrupting the UI, just log it.
+      console.error("Failed to sync board state:", error);
     }
+  },
+  
+  // Legacy alias
+  async saveTasks(tasks: Task[]): Promise<void> {
+    // If called without presence, just mock it (should not happen in new App.tsx)
+    await this.saveBoardState(tasks, { userId: 0, lastSeen: Date.now(), viewingTaskId: null });
   }
 };

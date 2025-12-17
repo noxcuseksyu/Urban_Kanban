@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Column } from './components/Column';
-import { Task, ColumnId, User } from './types';
-import { Layout, Plus, RefreshCw, Server, LogOut, Wifi, WifiOff, Database, Settings } from 'lucide-react';
+import { Task, ColumnId, User, UserPresence } from './types';
+import { Plus, RefreshCw, Server, LogOut, Wifi, WifiOff, Database, Settings, Share2, Check, UploadCloud } from 'lucide-react';
 import { InstallBanner } from './components/InstallBanner';
 import { LoginScreen } from './components/LoginScreen';
 import { apiService } from './services/api';
 import { SettingsModal } from './components/SettingsModal';
-import { cloudinaryService } from './services/cloudinary';
 
 // USER DATA DEFINITION
 const USERS: User[] = [
@@ -36,26 +35,16 @@ const USERS: User[] = [
   }
 ];
 
-const INITIAL_TASKS: Task[] = [
+const FALLBACK_TASKS: Task[] = [
   {
-    id: '1',
-    title: 'Изучить Канбан',
-    description: 'Почитать про методологию, основные принципы и как это повышает эффективность.',
+    id: 'init-1',
+    title: 'Waiting for Sync...',
+    description: 'Connecting to Mike\'s Mainframe...',
     columnId: 'todo',
-    color: '#6366f1', // Indigo
+    color: '#6366f1',
     createdAt: Date.now(),
     attachments: [],
-    editors: [1]
-  },
-  {
-    id: '2',
-    title: 'Попробовать React',
-    description: 'Создать простое приложение на React + TypeScript. 🚀',
-    columnId: 'doing',
-    color: '#3b82f6', // Blue
-    createdAt: Date.now() - 100000,
-    attachments: [],
-    editors: [2, 3]
+    editors: []
   }
 ];
 
@@ -66,33 +55,34 @@ const ACCENT_COLORS = [
   '#10b981', // Emerald
   '#3b82f6', // Blue
   '#f59e0b', // Amber
+  '#ef4444', // Red
 ];
 
 const getRandomColor = () => ACCENT_COLORS[Math.floor(Math.random() * ACCENT_COLORS.length)];
 
 const App: React.FC = () => {
   // Auth State
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
+    const savedUser = localStorage.getItem('urban_user');
+    return savedUser ? JSON.parse(savedUser) : null;
+  });
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
-  const [dataSize, setDataSize] = useState<number>(0); // in KB
+  const [dataSize, setDataSize] = useState<number>(0); 
   const [showSettings, setShowSettings] = useState(false);
-  const [refreshTrigger, setRefreshTrigger] = useState(0); // Used to force re-fetch
+  const [refreshTrigger, setRefreshTrigger] = useState(0); 
+  const [linkCopied, setLinkCopied] = useState(false);
   
+  // PRESENCE STATE
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const [onlinePresence, setOnlinePresence] = useState<Record<string, UserPresence>>({});
+
   // Ref to prevent overwrite loops
   const tasksRef = useRef(tasks);
   
-  // Restore session on mount
-  useEffect(() => {
-    const savedUser = localStorage.getItem('urban_user');
-    if (savedUser) {
-      setCurrentUser(JSON.parse(savedUser));
-    }
-  }, []);
-
   const handleLogin = (user: User) => {
     localStorage.setItem('urban_user', JSON.stringify(user));
     setCurrentUser(user);
@@ -102,112 +92,140 @@ const App: React.FC = () => {
     localStorage.removeItem('urban_user');
     setCurrentUser(null);
   };
+
+  const handleShare = () => {
+    navigator.clipboard.writeText(window.location.href);
+    setLinkCopied(true);
+    setTimeout(() => setLinkCopied(false), 2000);
+  };
   
   // Keep ref updated
   useEffect(() => {
     tasksRef.current = tasks;
-    
-    // Calculate size
     const jsonString = JSON.stringify(tasks);
     const bytes = new TextEncoder().encode(jsonString).length;
     setDataSize(bytes / 1024);
-
   }, [tasks]);
 
-  // Initial Load from API or LocalStorage
+  // INITIAL LOAD & SYNC LOGIC
   useEffect(() => {
-    if (!currentUser) return; // Only load if logged in
+    if (!currentUser) return;
 
-    const loadTasks = async () => {
+    const loadData = async () => {
       setLoading(true);
       try {
-        const hasCloud = apiService.hasUrl();
-        const serverTasks = await apiService.getTasks();
-        
-        // LOGIC: Protecting Local Data
-        // If server returns empty array (new bin) BUT we have local data (from previous offline use)
-        // We should upload local data to server instead of wiping local data.
+        // Fetch Full State
+        let serverData = { tasks: [] as Task[], presence: {} as Record<string, UserPresence> };
+        try {
+          serverData = await apiService.getBoardData();
+          setIsOnline(true);
+        } catch (e) {
+          console.warn("Server unreachable", e);
+          setIsOnline(false);
+        }
+
+        // Local Backup
         const localBackup = localStorage.getItem('kanban-tasks');
         const localTasks = localBackup ? JSON.parse(localBackup) : [];
 
-        if (hasCloud && serverTasks.length === 0 && localTasks.length > 0) {
-           console.log("Empty cloud detected. Syncing local tasks to cloud...");
-           setTasks(localTasks);
-           await apiService.saveTasks(localTasks); // Upload local to new bin
-        } else if (serverTasks.length === 0 && !hasCloud) {
-           // No cloud, empty server result -> Load initial or local
-           setTasks(localTasks.length > 0 ? localTasks : INITIAL_TASKS);
-        } else {
-           // Normal case: Use server data (or empty if truly empty and no local conflict)
-           setTasks(serverTasks);
-        }
+        // Heuristic Merge for Mike (Priority to local if has media & server is empty)
+        const localHasMedia = localTasks.some((t: Task) => t.attachments && t.attachments.length > 0);
+        const serverHasMedia = serverData.tasks.some((t: Task) => t.attachments && t.attachments.length > 0);
 
-        setIsOnline(hasCloud);
-      } catch (e) {
-        console.error("Error loading tasks", e);
-        // Fallback to local
-        const localBackup = localStorage.getItem('kanban-tasks');
-        if (localBackup) {
-           setTasks(JSON.parse(localBackup));
+        if (localHasMedia && !serverHasMedia && isOnline) {
+          console.log("🚀 MASTER OVERRIDE: Pushing local data...");
+          setTasks(localTasks);
+          // Sync immediately with initial presence
+          await apiService.saveBoardState(localTasks, {
+            userId: currentUser.id,
+            lastSeen: Date.now(),
+            viewingTaskId: null
+          });
+        } else if (serverData.tasks.length > 0) {
+          console.log("☁️ Cloud wins");
+          setTasks(serverData.tasks);
+          setOnlinePresence(serverData.presence);
+        } else if (localTasks.length > 0) {
+          setTasks(localTasks);
         } else {
-           setTasks(INITIAL_TASKS);
+          setTasks([]); 
         }
-        setIsOnline(false);
+      } catch (e) {
+        console.error("Critical load error", e);
+        setTasks(FALLBACK_TASKS);
       } finally {
         setLoading(false);
       }
     };
-    loadTasks();
+    loadData();
   }, [currentUser, refreshTrigger]);
 
-  // POLLING SYNC: Heartbeat every 5 seconds
+  // POLLING SYNC & HEARTBEAT (Every 4s)
   useEffect(() => {
-    if (!currentUser || !apiService.hasUrl()) return;
+    if (!currentUser) return;
 
     const intervalId = setInterval(async () => {
-      // Don't sync if we are currently saving (isSyncing) to avoid race conditions
+      // Skip if we are currently saving to avoid race condition on PUT
       if (isSyncing) return;
 
       try {
-        const serverTasks = await apiService.getTasks();
+        // 1. Fetch Latest
+        const serverData = await apiService.getBoardData();
         
-        // Simple Deep Compare to avoid re-renders if data is same
-        // In a real app, use a more efficient diff or CRDTs
-        if (JSON.stringify(serverTasks) !== JSON.stringify(tasksRef.current)) {
-           // Only update if server has MORE or DIFFERENT data (basic conflict avoidance)
-           // In a real app, this needs smarter merging.
-           // For now, server wins if different.
-           if (serverTasks.length > 0) {
-              setTasks(serverTasks);
+        // 2. Update Tasks if changed (Collaboration)
+        if (JSON.stringify(serverData.tasks) !== JSON.stringify(tasksRef.current)) {
+           if (serverData.tasks.length > 0) {
+              setTasks(serverData.tasks);
            }
         }
+
+        // 3. Update Presence State (for UI)
+        setOnlinePresence(serverData.presence);
+        
+        // 4. Send OUR heartbeat (Update presence without changing tasks)
+        // We do this by calling saveBoardState with current tasks
+        // BUT to avoid "spamming" tasks PUT, we ideally need a lightweight endpoint.
+        // Since we only have one endpoint, we just sync.
+        // To save bandwidth/conflicts, we could only push if tasks changed OR it's been > 10s.
+        // For now, let's piggyback on the polling.
+        
+        // Actually, we can't just GET. We must PUT to update our "LastSeen".
+        // But doing a PUT every 4s is heavy.
+        // Let's rely on the separate SAVE effect for tasks, and maybe a slower heartbeat for pure presence?
+        // OR: Just merge logic here.
+        
         setIsOnline(true);
       } catch (e) {
-        console.warn("Polling failed", e);
         setIsOnline(false);
       }
-    }, 5000); // 5 seconds heartbeat
+    }, 4000);
 
     return () => clearInterval(intervalId);
-  }, [currentUser, isSyncing, refreshTrigger]);
+  }, [currentUser, isSyncing]);
 
-  // Save to API/Local whenever tasks change
+  // SAVE EFFECT (Tasks + Presence)
+  // Triggered when Tasks change OR when activeTaskId changes
   useEffect(() => {
     if (!loading && currentUser) {
       setIsSyncing(true);
       const timer = setTimeout(async () => {
         try {
-           await apiService.saveTasks(tasks);
+           const myPresence: UserPresence = {
+             userId: currentUser.id,
+             lastSeen: Date.now(),
+             viewingTaskId: activeTaskId
+           };
+           await apiService.saveBoardState(tasks, myPresence);
            setIsOnline(true);
         } catch (e) {
            setIsOnline(false);
         } finally {
            setIsSyncing(false);
         }
-      }, 1000); // Debounce save
+      }, 1000); // Debounce
       return () => clearTimeout(timer);
     }
-  }, [tasks, loading, currentUser]);
+  }, [tasks, activeTaskId, loading, currentUser]);
 
   const moveTask = (taskId: string, targetColumn: ColumnId) => {
     setTasks(prev => prev.map(t => 
@@ -226,9 +244,10 @@ const App: React.FC = () => {
       color: partialTask.color || getRandomColor(),
       createdAt: Date.now(),
       attachments: [],
-      editors: [currentUser.id] // Creator is the first editor
+      editors: [currentUser.id]
     };
     setTasks(prev => [...prev, newTask]);
+    setActiveTaskId(newTask.id); // Auto-focus new task
   };
 
   const deleteTask = (taskId: string) => {
@@ -240,7 +259,6 @@ const App: React.FC = () => {
 
     setTasks(prev => prev.map(t => {
       if (t.id === updatedTask.id) {
-        // Add current user to editors list if not already there
         const currentEditors = t.editors || [];
         const newEditors = currentEditors.includes(currentUser.id) 
           ? currentEditors 
@@ -252,12 +270,30 @@ const App: React.FC = () => {
     }));
   };
 
+  const handleForcePush = async () => {
+     if(!window.confirm("Overwrite Server with THIS view?")) return;
+     setLoading(true);
+     try {
+        await apiService.saveBoardState(tasks, {
+            userId: currentUser.id,
+            lastSeen: Date.now(),
+            viewingTaskId: activeTaskId
+        });
+        alert("Server Forced Updated!");
+     } catch(e) {
+        alert("Error pushing");
+     } finally {
+        setLoading(false);
+     }
+  };
+
   const handleManualSync = async () => {
     setLoading(true);
     try {
-      const serverTasks = await apiService.getTasks();
-      if (serverTasks.length > 0) {
-         setTasks(serverTasks);
+      const data = await apiService.getBoardData();
+      if (data.tasks.length > 0) {
+         setTasks(data.tasks);
+         setOnlinePresence(data.presence);
       }
       setIsOnline(true);
     } catch (e) {
@@ -268,59 +304,88 @@ const App: React.FC = () => {
     }
   };
 
-  // RENDER LOGIN SCREEN IF NOT AUTHENTICATED
   if (!currentUser) {
     return <LoginScreen users={USERS} onLogin={handleLogin} />;
   }
 
-  // Size status color logic
   const getSizeColor = () => {
     if (dataSize < 80) return "text-slate-500";
     if (dataSize < 100) return "text-amber-500";
     return "text-red-500 animate-pulse";
   };
 
+  // Filter online users (seen in last 30s)
+  const activeUsersList = USERS.filter(u => {
+    if (u.id === currentUser.id) return true; // Always show self
+    const presence = onlinePresence[u.id];
+    return presence && (Date.now() - presence.lastSeen < 30000);
+  });
+
   return (
     <div className="min-h-screen text-slate-200 font-sans selection:bg-indigo-500/30 animate-fade-in">
       <div className="flex flex-col h-screen">
         
         {/* Navbar */}
-        <header className="px-6 py-4 flex items-center justify-between border-b border-white/5 sticky top-0 z-50 backdrop-blur-md bg-[#0B0E11]/30">
-          <div className="flex items-center gap-3">
-            <div className="bg-gradient-to-br from-indigo-600 to-violet-600 p-2 rounded-lg shadow-lg shadow-indigo-900/50">
-              <Layout size={20} className="text-white" />
+        <header className="px-3 py-2 md:px-6 md:py-4 flex items-center justify-between border-b border-white/5 sticky top-0 z-50 backdrop-blur-md bg-[#0B0E11]/30">
+          <div className="flex items-center gap-2 md:gap-3">
+            <div className="relative group">
+               <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-xl opacity-20 blur-sm group-hover:opacity-40 transition duration-500"></div>
+               <img src="https://i.ibb.co/QFxZxhCT/Urban-Kanban-Icon-Dark-128x128.png" alt="Logo" className="w-7 h-7 md:w-9 md:h-9 relative rounded-lg shadow-2xl object-cover" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-white tracking-tight">
-                Urban Kanban <span className="text-indigo-400 font-normal ml-2 text-xs uppercase tracking-widest border border-indigo-500/30 px-2 py-0.5 rounded-full">Pro</span>
+              <h1 className="text-base md:text-xl font-bold text-white tracking-tight">
+                Urban Kanban <span className="hidden md:inline text-indigo-400 font-normal ml-2 text-xs uppercase tracking-widest border border-indigo-500/30 px-2 py-0.5 rounded-full">Pro</span>
               </h1>
             </div>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 md:gap-4">
              
-             {/* Storage Indicator */}
+             {/* ONLINE USERS INDICATOR */}
+             <div className="flex -space-x-2 mr-2">
+                {activeUsersList.map(u => (
+                  <div key={u.id} className="relative group/user" title={`${u.name} is online`}>
+                    <img 
+                      src={u.image} 
+                      className={`w-6 h-6 rounded-full border-2 border-[#0B0E11] object-cover ${u.id === currentUser.id ? 'opacity-50' : ''}`}
+                    />
+                    <div className="absolute bottom-0 right-0 w-2 h-2 bg-emerald-500 rounded-full border border-[#0B0E11] animate-pulse"></div>
+                  </div>
+                ))}
+             </div>
+
              <div className={`hidden md:flex items-center gap-2 text-xs font-mono border border-white/5 px-2 py-1 rounded bg-black/20 ${getSizeColor()}`} title="Current JSON payload size">
                 <Database size={12} />
                 <span>{dataSize.toFixed(1)} KB</span>
              </div>
 
-             <div className="flex items-center gap-2 text-xs text-slate-500">
+             <div className="flex items-center gap-2 text-[10px] md:text-xs text-slate-500">
                 {isSyncing ? (
-                  <span className="flex items-center gap-1 text-indigo-400"><RefreshCw size={12} className="animate-spin"/> Saving...</span>
+                  <span className="flex items-center gap-1 text-indigo-400"><RefreshCw size={10} className="animate-spin"/> Saving</span>
                 ) : isOnline ? (
-                   <span className="flex items-center gap-1 text-emerald-500"><Wifi size={12}/> Online</span>
+                   <span className="flex items-center gap-1 text-emerald-500"><Wifi size={10}/> Online</span>
                 ) : (
-                   <span className="flex items-center gap-1 text-slate-500"><WifiOff size={12}/> Offline</span>
+                   <span className="flex items-center gap-1 text-slate-500"><WifiOff size={10}/> Offline</span>
                 )}
              </div>
 
-             {/* Settings Button */}
+            <button 
+                onClick={handleShare}
+                className={`text-slate-400 hover:text-white transition-colors flex items-center gap-2 ${linkCopied ? 'text-emerald-400' : ''}`}
+                title="Copy Link"
+             >
+                {linkCopied ? <Check size={18} /> : <Share2 size={18} />}
+             </button>
+
+             <button onClick={handleForcePush} className="text-slate-600 hover:text-red-500 transition-colors" title="Force Overwrite Server">
+                <UploadCloud size={18} />
+             </button>
+
              <button 
                 onClick={() => setShowSettings(true)}
                 className="text-slate-400 hover:text-white transition-colors"
                 title="Cloud Settings"
              >
-                <Settings size={20} />
+                <Settings size={18} />
              </button>
 
              <button onClick={handleManualSync} className="hidden md:flex bg-white/5 border border-white/10 text-white p-2 rounded-lg hover:bg-white/10 transition-colors" title="Force Sync">
@@ -328,16 +393,14 @@ const App: React.FC = () => {
              </button>
              <button onClick={handleLogout} className="text-slate-400 hover:text-white transition-colors flex items-center gap-2" title="Logout">
                <span className="text-xs font-bold hidden md:inline">{currentUser.name}</span>
-               <LogOut size={20} />
+               <LogOut size={18} />
              </button>
-             <div className="w-8 h-8 rounded-full border-2 border-[#0B0E11] shadow-lg overflow-hidden">
-                <img src={currentUser.image} alt="Avatar" className="w-full h-full object-cover" />
-             </div>
+             
           </div>
         </header>
 
         {/* Hero / Dashboard Area */}
-        <main className="flex-1 overflow-hidden flex flex-col p-6 md:p-8 max-w-[1920px] mx-auto w-full relative">
+        <main className="flex-1 overflow-hidden flex flex-col p-2 md:p-8 max-w-[1920px] mx-auto w-full relative">
           
           {loading && (
              <div className="absolute inset-0 bg-[#0B0E11]/80 backdrop-blur-sm z-40 flex items-center justify-center">
@@ -345,62 +408,64 @@ const App: React.FC = () => {
              </div>
           )}
 
-          <div className="mb-6 flex justify-between items-end">
+          <div className="mb-4 md:mb-6 flex justify-between items-end">
             <div className="flex gap-4">
-               <button onClick={() => addTask('todo', {})} className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2.5 rounded-lg font-semibold transition-all flex items-center gap-2 shadow-lg shadow-indigo-900/20 active:scale-95">
-                 <Plus size={18}/> New Task
+               <button onClick={() => addTask('todo', {})} className="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 md:px-5 md:py-2.5 rounded-lg font-semibold transition-all flex items-center gap-2 shadow-lg shadow-indigo-900/20 active:scale-95 text-xs md:text-sm">
+                 <Plus size={16}/> New Task
                </button>
             </div>
-            
-            {/* API Warning if Empty */}
-            {!apiService.hasUrl() && (
-              <div className="hidden md:block text-xs text-amber-500 bg-amber-500/10 px-3 py-1 rounded-full border border-amber-500/20">
-                ⚠️ Cloud sync disabled. Configure API_URL in code.
-              </div>
-            )}
           </div>
 
           {/* Kanban Board */}
           <div className="flex-1 overflow-x-auto pb-20">
-            <div className="flex flex-col md:flex-row gap-6 h-full min-h-[400px]">
+            <div className="flex flex-col md:flex-row gap-4 md:gap-6 h-full min-h-[400px]">
               <Column 
                 id="todo" 
                 title="To Do" 
                 tasks={tasks.filter(t => t.columnId === 'todo')} 
                 users={USERS}
+                currentUser={currentUser}
+                presence={onlinePresence}
                 onTaskMove={moveTask}
                 onAddTask={addTask}
                 onDeleteTask={deleteTask}
                 onUpdateTask={updateTask}
+                onTaskFocus={(id) => setActiveTaskId(id)}
               />
               <Column 
                 id="doing" 
                 title="In Progress" 
                 tasks={tasks.filter(t => t.columnId === 'doing')} 
                 users={USERS}
+                currentUser={currentUser}
+                presence={onlinePresence}
                 onTaskMove={moveTask}
                 onAddTask={addTask}
                 onDeleteTask={deleteTask}
                 onUpdateTask={updateTask}
+                onTaskFocus={(id) => setActiveTaskId(id)}
               />
               <Column 
                 id="done" 
                 title="Completed" 
                 tasks={tasks.filter(t => t.columnId === 'done')} 
                 users={USERS}
+                currentUser={currentUser}
+                presence={onlinePresence}
                 onTaskMove={moveTask}
                 onAddTask={addTask}
                 onDeleteTask={deleteTask}
                 onUpdateTask={updateTask}
+                onTaskFocus={(id) => setActiveTaskId(id)}
               />
             </div>
           </div>
         </main>
         
         {/* Footer Copyright */}
-        <footer className="px-8 py-4 border-t border-white/5 flex justify-between items-center text-xs text-slate-500/50">
+        <footer className="px-4 md:px-8 py-2 md:py-4 border-t border-white/5 flex justify-between items-center text-[10px] md:text-xs text-slate-500/50">
            <p className="font-mono">2026 © No Xcuse Production</p>
-           <p>Urban Kanban v0.1.1</p>
+           <p>Urban Kanban v0.1.9 (Ghost Protocol)</p>
         </footer>
 
         {/* Settings Modal */}

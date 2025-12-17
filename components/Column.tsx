@@ -1,5 +1,5 @@
 import React from 'react';
-import { Task, ColumnId, User } from '../types';
+import { Task, ColumnId, User, UserPresence } from '../types';
 import { TaskCard } from './TaskCard';
 import { Plus, BrainCircuit, MoreHorizontal } from 'lucide-react';
 import { askLindaForIdeas } from '../services/geminiService';
@@ -9,13 +9,19 @@ interface ColumnProps {
   title: string;
   tasks: Task[];
   users: User[];
+  currentUser: User;
+  presence: Record<string, UserPresence>;
   onTaskMove: (taskId: string, targetColumn: ColumnId) => void;
   onAddTask: (columnId: ColumnId, task: Partial<Task>) => void;
   onDeleteTask: (taskId: string) => void;
   onUpdateTask: (task: Task) => void;
+  onTaskFocus: (taskId: string | null) => void;
 }
 
-export const Column: React.FC<ColumnProps> = ({ id, title, tasks, users, onTaskMove, onAddTask, onDeleteTask, onUpdateTask }) => {
+export const Column: React.FC<ColumnProps> = ({ 
+  id, title, tasks, users, currentUser, presence, 
+  onTaskMove, onAddTask, onDeleteTask, onUpdateTask, onTaskFocus 
+}) => {
   const [isBrainstorming, setIsBrainstorming] = React.useState(false);
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
@@ -62,39 +68,54 @@ export const Column: React.FC<ColumnProps> = ({ id, title, tasks, users, onTaskM
     return { onMoveLeft, onMoveRight };
   };
 
+  // Calculate Active Viewers per task
+  const getViewersForTask = (taskId: string) => {
+    const viewerIds: number[] = [];
+    Object.values(presence).forEach(p => {
+       // Check if user is viewing THIS task AND is currently online (last 30s)
+       // AND is not the current user (we know we are looking at it)
+       if (p.viewingTaskId === taskId && 
+           Date.now() - p.lastSeen < 30000 &&
+           p.userId !== currentUser.id) {
+           viewerIds.push(p.userId);
+       }
+    });
+    return viewerIds.map(id => users.find(u => u.id === id)).filter(Boolean) as User[];
+  };
+
   return (
     <div 
-      className="flex-1 min-w-[320px] h-full flex flex-col rounded-xl bg-[#0F1318]/50 border border-white/5 p-4"
+      className="flex-1 min-w-full md:min-w-[320px] h-full flex flex-col rounded-xl bg-[#0F1318]/50 border border-white/5 p-2 md:p-4"
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      <div className="flex justify-between items-center mb-4">
+      <div className="flex justify-between items-center mb-2 md:mb-4 px-1">
         <div className="flex items-center gap-2">
-          <h2 className="text-sm font-semibold text-slate-200 uppercase tracking-wider">{title}</h2>
-          <span className="text-xs text-slate-500 font-mono bg-white/5 px-2 py-0.5 rounded-full">{tasks.length}</span>
+          <h2 className="text-xs md:text-sm font-semibold text-slate-200 uppercase tracking-wider">{title}</h2>
+          <span className="text-[10px] text-slate-500 font-mono bg-white/5 px-2 py-0.5 rounded-full">{tasks.length}</span>
         </div>
         <div className="flex gap-1">
           <button 
             onClick={handleBrainstorm}
             disabled={isBrainstorming}
-            className="p-1.5 rounded hover:bg-white/5 text-slate-500 hover:text-indigo-400 transition-colors"
+            className="p-1 md:p-1.5 rounded hover:bg-white/5 text-slate-500 hover:text-indigo-400 transition-colors"
             title="Generate ideas with AI"
           >
-            <BrainCircuit size={16} className={isBrainstorming ? "animate-pulse" : ""} />
+            <BrainCircuit size={14} className={isBrainstorming ? "animate-pulse" : ""} />
           </button>
           <button 
             onClick={() => onAddTask(id, {})}
-            className="p-1.5 rounded hover:bg-white/5 text-slate-500 hover:text-white transition-colors"
+            className="p-1 md:p-1.5 rounded hover:bg-white/5 text-slate-500 hover:text-white transition-colors"
           >
-            <Plus size={16} />
+            <Plus size={14} />
           </button>
-          <button className="p-1.5 rounded hover:bg-white/5 text-slate-500 hover:text-white transition-colors">
-            <MoreHorizontal size={16} />
+          <button className="p-1 md:p-1.5 rounded hover:bg-white/5 text-slate-500 hover:text-white transition-colors">
+            <MoreHorizontal size={14} />
           </button>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+      <div className="flex-1 overflow-y-auto pr-1 md:pr-2 custom-scrollbar">
         {tasks.map(task => {
           const { onMoveLeft, onMoveRight } = getMoveHandlers(task.id);
           return (
@@ -102,16 +123,18 @@ export const Column: React.FC<ColumnProps> = ({ id, title, tasks, users, onTaskM
               key={task.id} 
               task={task} 
               users={users}
+              viewers={getViewersForTask(task.id)}
               onDragStart={handleDragStart} 
               onDelete={onDeleteTask}
               onUpdate={onUpdateTask}
               onMoveLeft={onMoveLeft}
               onMoveRight={onMoveRight}
+              onFocus={onTaskFocus}
             />
           );
         })}
         {tasks.length === 0 && (
-          <div className="h-24 border border-dashed border-white/5 rounded-lg flex flex-col items-center justify-center text-slate-600 text-xs gap-2">
+          <div className="h-16 md:h-24 border border-dashed border-white/5 rounded-lg flex flex-col items-center justify-center text-slate-600 text-[10px] md:text-xs gap-1 md:gap-2">
             <span>No tasks yet</span>
             <button onClick={() => onAddTask(id, {})} className="text-indigo-500 hover:underline">Add one</button>
           </div>

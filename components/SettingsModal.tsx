@@ -1,46 +1,34 @@
-import React, { useState, useEffect } from 'react';
-import { X, Cloud, Save, AlertTriangle, Database, Link as LinkIcon } from 'lucide-react';
+import React, { useState } from 'react';
+import { X, Cloud, Save, AlertTriangle, Database, Link as LinkIcon, Eye, EyeOff, ShieldCheck } from 'lucide-react';
 import { cloudinaryService } from '../services/cloudinary';
+import { apiService } from '../services/api';
 
 interface SettingsModalProps {
   onClose: () => void;
-  onUpdate: () => void; // New prop to trigger App refresh
+  onUpdate: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, onUpdate }) => {
-  // Cloudinary State
-  const [cloudName, setCloudName] = useState('');
-  const [preset, setPreset] = useState('');
+  // Initialize state with EFFECTIVE config (defaults included)
+  const [cloudName, setCloudName] = useState(() => cloudinaryService.getConfig().cloudName);
+  const [preset, setPreset] = useState(() => cloudinaryService.getConfig().uploadPreset);
+  const [showPreset, setShowPreset] = useState(false);
   
-  // JSONBin State
-  const [binId, setBinId] = useState('');
-  const [apiKey, setApiKey] = useState('');
+  const [binId, setBinId] = useState(() => apiService.getEffectiveConfig().binId);
+  const [apiKey, setApiKey] = useState(() => apiService.getEffectiveConfig().apiKey);
+  const [showKey, setShowKey] = useState(false);
 
   const [saved, setSaved] = useState(false);
   const [activeTab, setActiveTab] = useState<'media' | 'sync'>('media');
 
-  useEffect(() => {
-    // Load Cloudinary
-    const cloudConfig = cloudinaryService.getConfig();
-    setCloudName(cloudConfig.cloudName);
-    setPreset(cloudConfig.uploadPreset);
-
-    // Load JSONBin
-    setBinId(localStorage.getItem('urban_jsonbin_id') || '');
-    setApiKey(localStorage.getItem('urban_jsonbin_key') || '');
-  }, []);
-
   const handleSave = () => {
-    // Save Cloudinary
+    // Save to local storage (overrides defaults if changed, or persists current)
     cloudinaryService.setConfig(cloudName.trim(), preset.trim());
 
-    // Save JSONBin
     localStorage.setItem('urban_jsonbin_id', binId.trim());
     localStorage.setItem('urban_jsonbin_key', apiKey.trim());
 
     setSaved(true);
-    
-    // Notify App to refresh connection status without reloading page
     onUpdate();
 
     setTimeout(() => {
@@ -59,67 +47,73 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, onUpdate 
           <X size={20} />
         </button>
 
+        {/* Header with Directive Badge */}
+        <div className="p-6 pb-2">
+            <div className="flex items-center gap-2 mb-2">
+                <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                    <ShieldCheck size={10} /> AUTO-CONFIGURED
+                </span>
+            </div>
+        </div>
+
         {/* Tabs */}
-        <div className="flex border-b border-white/5">
+        <div className="flex border-b border-white/5 mx-6">
           <button 
             onClick={() => setActiveTab('media')}
-            className={`flex-1 py-4 text-sm font-bold uppercase tracking-wider transition-colors ${activeTab === 'media' ? 'bg-indigo-500/10 text-indigo-400 border-b-2 border-indigo-500' : 'text-slate-500 hover:text-slate-300'}`}
+            className={`flex-1 py-3 text-sm font-bold uppercase tracking-wider transition-colors ${activeTab === 'media' ? 'text-indigo-400 border-b-2 border-indigo-500' : 'text-slate-500 hover:text-slate-300'}`}
           >
-            Media (Cloudinary)
+            Media
           </button>
           <button 
             onClick={() => setActiveTab('sync')}
-            className={`flex-1 py-4 text-sm font-bold uppercase tracking-wider transition-colors ${activeTab === 'sync' ? 'bg-indigo-500/10 text-indigo-400 border-b-2 border-indigo-500' : 'text-slate-500 hover:text-slate-300'}`}
+            className={`flex-1 py-3 text-sm font-bold uppercase tracking-wider transition-colors ${activeTab === 'sync' ? 'text-indigo-400 border-b-2 border-indigo-500' : 'text-slate-500 hover:text-slate-300'}`}
           >
-            Sync (JSONBin)
+            Sync
           </button>
         </div>
 
-        <div className="p-6 overflow-y-auto custom-scrollbar">
+        <div className="p-6 pt-4 overflow-y-auto custom-scrollbar">
           
           {/* MEDIA TAB */}
           {activeTab === 'media' && (
             <>
-              <div className="flex items-center gap-3 mb-6">
-                <div className="bg-indigo-600/20 p-3 rounded-xl text-indigo-400">
-                  <Cloud size={24} />
+              <div className="flex items-center gap-3 mb-4">
+                <div className="bg-indigo-600/20 p-2.5 rounded-xl text-indigo-400">
+                  <Cloud size={20} />
                 </div>
                 <div>
-                  <h2 className="text-xl font-bold text-white">Media Storage</h2>
-                  <p className="text-xs text-slate-400">Store images & videos in Cloudinary</p>
+                  <h2 className="text-lg font-bold text-white">Cloudinary</h2>
+                  <p className="text-xs text-slate-400">Media storage credentials</p>
                 </div>
               </div>
 
               <div className="space-y-4">
-                <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 flex gap-3">
-                  <AlertTriangle className="text-amber-500 shrink-0" size={18} />
-                  <p className="text-[10px] text-amber-200/80 leading-relaxed">
-                    1. Go to Cloudinary <strong>Settings &gt; Upload</strong>.
-                    <br/>2. Add new <strong>Upload Preset</strong>.
-                    <br/>3. Set <strong>Signing Mode</strong> to <strong>Unsigned</strong>.
-                  </p>
-                </div>
-
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-400 uppercase ml-1">Cloud Name</label>
                   <input
                     type="text"
                     value={cloudName}
                     onChange={(e) => setCloudName(e.target.value)}
-                    placeholder="e.g. dy7j..."
-                    className="w-full bg-[#0B0E11] border border-white/10 rounded-lg px-4 py-3 text-white focus:border-indigo-500 outline-none transition-colors font-mono text-sm"
+                    className="w-full bg-[#0B0E11] border border-white/10 rounded-lg px-4 py-3 text-emerald-400 font-bold focus:border-indigo-500 outline-none transition-colors font-mono text-sm"
                   />
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-400 uppercase ml-1">Upload Preset (Unsigned)</label>
-                  <input
-                    type="text"
-                    value={preset}
-                    onChange={(e) => setPreset(e.target.value)}
-                    placeholder="e.g. urban_preset"
-                    className="w-full bg-[#0B0E11] border border-white/10 rounded-lg px-4 py-3 text-white focus:border-indigo-500 outline-none transition-colors font-mono text-sm"
-                  />
+                  <label className="text-xs font-bold text-slate-400 uppercase ml-1">Upload Preset</label>
+                  <div className="relative">
+                    <input
+                      type={showPreset ? "text" : "password"}
+                      value={preset}
+                      onChange={(e) => setPreset(e.target.value)}
+                      className="w-full bg-[#0B0E11] border border-white/10 rounded-lg px-4 py-3 text-emerald-400 font-bold focus:border-indigo-500 outline-none transition-colors font-mono text-sm pr-10"
+                    />
+                    <button 
+                      onClick={() => setShowPreset(!showPreset)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"
+                    >
+                      {showPreset ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
                 </div>
               </div>
             </>
@@ -128,45 +122,43 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, onUpdate 
           {/* SYNC TAB */}
           {activeTab === 'sync' && (
             <>
-              <div className="flex items-center gap-3 mb-6">
-                <div className="bg-emerald-600/20 p-3 rounded-xl text-emerald-400">
-                  <Database size={24} />
+              <div className="flex items-center gap-3 mb-4">
+                <div className="bg-emerald-600/20 p-2.5 rounded-xl text-emerald-400">
+                  <Database size={20} />
                 </div>
                 <div>
-                  <h2 className="text-xl font-bold text-white">Data Sync</h2>
-                  <p className="text-xs text-slate-400">Sync tasks across devices via JSONBin.io</p>
+                  <h2 className="text-lg font-bold text-white">JSONBin.io</h2>
+                  <p className="text-xs text-slate-400">Database synchronization</p>
                 </div>
               </div>
 
               <div className="space-y-4">
-                 <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3 flex gap-3">
-                  <LinkIcon className="text-blue-500 shrink-0" size={18} />
-                  <p className="text-[10px] text-blue-200/80 leading-relaxed">
-                    Leave blank to use <strong>Local Storage</strong> only (Offline Mode).
-                    <br/>To sync: Register at jsonbin.io, create a bin, and paste ID & Key here.
-                  </p>
-                </div>
-
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-400 uppercase ml-1">Bin ID</label>
                   <input
                     type="text"
                     value={binId}
                     onChange={(e) => setBinId(e.target.value)}
-                    placeholder="e.g. 69400aa9..."
-                    className="w-full bg-[#0B0E11] border border-white/10 rounded-lg px-4 py-3 text-white focus:border-indigo-500 outline-none transition-colors font-mono text-sm"
+                    className="w-full bg-[#0B0E11] border border-white/10 rounded-lg px-4 py-3 text-emerald-400 font-bold focus:border-indigo-500 outline-none transition-colors font-mono text-sm"
                   />
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-400 uppercase ml-1">X-Master-Key</label>
-                  <input
-                    type="password"
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    placeholder="e.g. $2a$10$..."
-                    className="w-full bg-[#0B0E11] border border-white/10 rounded-lg px-4 py-3 text-white focus:border-indigo-500 outline-none transition-colors font-mono text-sm"
-                  />
+                  <label className="text-xs font-bold text-slate-400 uppercase ml-1">Master Key</label>
+                  <div className="relative">
+                    <input
+                      type={showKey ? "text" : "password"}
+                      value={apiKey}
+                      onChange={(e) => setApiKey(e.target.value)}
+                      className="w-full bg-[#0B0E11] border border-white/10 rounded-lg px-4 py-3 text-emerald-400 font-bold focus:border-indigo-500 outline-none transition-colors font-mono text-sm pr-10"
+                    />
+                     <button 
+                      onClick={() => setShowKey(!showKey)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"
+                    >
+                      {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
                 </div>
               </div>
             </>
@@ -180,7 +172,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ onClose, onUpdate 
               : 'bg-white text-black hover:bg-slate-200'
             }`}
           >
-            {saved ? <span className="flex items-center gap-2"><Save size={18} /> Saved!</span> : 'Save Configuration'}
+            {saved ? <span className="flex items-center gap-2"><Save size={18} /> Saved!</span> : 'Update Config'}
           </button>
         </div>
       </div>

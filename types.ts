@@ -18,6 +18,17 @@ export interface Task {
   editors?: number[]; // IDs of users who edited this task
 }
 
+export interface UserPresence {
+  userId: number;
+  lastSeen: number; // Timestamp
+  viewingTaskId: string | null; // ID задачи, которую юзер сейчас смотрит/редактирует
+}
+
+export interface BoardData {
+  tasks: Task[];
+  presence: Record<string, UserPresence>; // Key is userId as string
+}
+
 export interface LindaResponse {
   text: string;
   suggestions?: string[];

@@ -39,7 +39,17 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ users, onLogin }) => {
         <div className="absolute bottom-[-20%] right-[-10%] w-[600px] h-[600px] bg-purple-600/10 rounded-full blur-[100px]" />
       </div>
 
-      <div className="z-10 text-center mb-12">
+      <div className="z-10 text-center mb-12 flex flex-col items-center">
+        {/* Logo Added Here */}
+        <div className="mb-6 relative">
+          <div className="absolute inset-0 bg-indigo-500/20 blur-xl rounded-full"></div>
+          <img 
+            src="https://i.ibb.co/7NpZ5my4/Urban-Kanban-Icon-Dark-256x256.png" 
+            alt="Urban Kanban Logo" 
+            className="w-24 h-24 md:w-32 md:h-32 relative drop-shadow-2xl animate-fade-in" 
+          />
+        </div>
+
         <h1 className="text-4xl md:text-6xl font-black text-white tracking-tighter mb-2 drop-shadow-2xl">
           URBAN <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-cyan-400">KANBAN</span>
         </h1>

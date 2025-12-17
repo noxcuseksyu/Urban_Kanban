@@ -1,17 +1,19 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Task, Attachment, User } from '../types';
-import { Sparkles, Trash2, Settings2, Check, X, Mic, Image as ImageIcon, Video, Music, Paperclip, ChevronLeft, ChevronRight, Save, RotateCcw, CloudLightning } from 'lucide-react';
+import { Sparkles, Trash2, Settings2, Check, X, Mic, Image as ImageIcon, Video, Music, Paperclip, ChevronLeft, ChevronRight, Save, RotateCcw, CloudLightning, Eye } from 'lucide-react';
 import { askLindaToImprove } from '../services/geminiService';
 import { cloudinaryService } from '../services/cloudinary';
 
 interface TaskCardProps {
   task: Task;
   users: User[];
+  viewers?: User[]; // New prop for online viewers
   onDragStart: (e: React.DragEvent<HTMLDivElement>, id: string) => void;
   onDelete: (id: string) => void;
   onUpdate: (task: Task) => void;
   onMoveLeft?: () => void;
   onMoveRight?: () => void;
+  onFocus?: (id: string | null) => void;
 }
 
 const ACCENT_COLORS = [
@@ -26,7 +28,10 @@ const ACCENT_COLORS = [
 
 const QUICK_EMOJIS = ['🔥', '🚀', '✅', '⚠️', '👀', '🧠', '💀', '🎉'];
 
-export const TaskCard: React.FC<TaskCardProps> = ({ task, users, onDragStart, onDelete, onUpdate, onMoveLeft, onMoveRight }) => {
+export const TaskCard: React.FC<TaskCardProps> = ({ 
+  task, users, viewers = [], 
+  onDragStart, onDelete, onUpdate, onMoveLeft, onMoveRight, onFocus 
+}) => {
   const [showToolbar, setShowToolbar] = useState(false);
   
   // Local state for immediate typing response
@@ -41,9 +46,17 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, users, onDragStart, on
   // Determine if there are unsaved changes
   const isDirty = localTitle !== task.title || localDesc !== task.description;
 
+  // Signal focus when hovering or clicking
+  const handleInteraction = () => {
+    if (onFocus) onFocus(task.id);
+  };
+  
+  const handleBlur = () => {
+    // Optional: timeout to clear focus, but usually we just leave last active
+    // if (onFocus) onFocus(null);
+  };
+
   useEffect(() => {
-    // Sync if props update externally (and we are not dirty)
-    // Or if we just saved
     setLocalTitle(task.title);
     setLocalDesc(task.description);
   }, [task.title, task.description]);
@@ -90,7 +103,6 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, users, onDragStart, on
       }
 
       if (!useCloud) {
-        // Fallback to Base64
         url = await new Promise((resolve) => {
            const reader = new FileReader();
            reader.onloadend = () => resolve(reader.result as string);
@@ -123,7 +135,6 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, users, onDragStart, on
     }
   };
 
-  // Paste Handler
   const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
     if (e.clipboardData.files.length > 0) {
       e.preventDefault(); 
@@ -139,7 +150,6 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, users, onDragStart, on
     }
   };
 
-  // Voice Input Logic
   const toggleVoiceInput = () => {
     if (isListening) {
       setIsListening(false);
@@ -171,10 +181,6 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, users, onDragStart, on
       setIsListening(false);
     };
 
-    recognition.onerror = (event: any) => {
-      setIsListening(false);
-    };
-
     recognition.onend = () => {
       setIsListening(false);
     };
@@ -185,7 +191,6 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, users, onDragStart, on
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    // Check size only if NOT using cloud (Cloudinary handles big files, but let's keep it sane)
     if (!cloudinaryService.isConfigured() && file.size > 3 * 1024 * 1024) {
       alert("Файл слишком большой для локального хранения (3МБ). Настрой Cloudinary для больших файлов!");
       return;
@@ -217,25 +222,45 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, users, onDragStart, on
       draggable
       onDragStart={(e) => onDragStart(e, task.id)}
       onPaste={handlePaste}
+      onMouseEnter={handleInteraction}
+      onTouchStart={handleInteraction}
       className={`
         card-3d perspective-1000
-        relative p-4 rounded-xl mb-4 
+        relative p-3 md:p-4 rounded-xl mb-3 md:mb-4 
         group bg-[#151B21] border 
-        ${isDirty ? 'border-amber-500/50 shadow-amber-500/10' : 'border-[#2D3748] hover:border-indigo-500/50 hover:shadow-indigo-500/10'}
+        ${viewers.length > 0 ? 'border-indigo-500 shadow-indigo-500/20' : 
+          isDirty ? 'border-amber-500/50 shadow-amber-500/10' : 'border-[#2D3748] hover:border-indigo-500/50 hover:shadow-indigo-500/10'}
         animate-fade-in
         transition-all duration-300
         hover:shadow-2xl
       `}
-      style={{ borderLeft: `4px solid ${task.color}` }}
+      style={{ borderLeft: `3px solid ${task.color}` }}
     >
+      {/* Presence Indicators (Viewers) */}
+      {viewers.length > 0 && (
+         <div className="absolute -top-2 -right-2 flex -space-x-1 z-20">
+            {viewers.map((v, i) => (
+               <div key={`viewer-${i}`} className="relative">
+                  <img 
+                    src={v.image} 
+                    className="w-5 h-5 rounded-full border border-indigo-500 object-cover shadow-lg shadow-indigo-500/50" 
+                    title={`${v.name} is looking at this`}
+                  />
+                  <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-emerald-500 rounded-full border border-black"></div>
+               </div>
+            ))}
+         </div>
+      )}
+
       {/* Header: Title & Edit Toggle */}
-      <div className="flex justify-between items-start mb-2 gap-2">
+      <div className="flex justify-between items-start mb-1 gap-2">
         <input
           value={localTitle}
           onChange={(e) => setLocalTitle(e.target.value)}
+          onFocus={handleInteraction}
           onMouseDown={preventDrag}
           placeholder="Название задачи"
-          className="bg-transparent font-semibold text-lg text-white w-full outline-none border-b border-transparent focus:border-indigo-500 transition-colors placeholder:text-slate-600"
+          className="bg-transparent font-semibold text-sm md:text-lg text-white w-full outline-none border-b border-transparent focus:border-indigo-500 transition-colors placeholder:text-slate-600 leading-tight"
         />
         <button 
           onClick={() => setShowToolbar(!showToolbar)}
@@ -244,7 +269,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, users, onDragStart, on
             ${showToolbar ? 'text-indigo-400 bg-indigo-500/10' : 'opacity-0 group-hover:opacity-100'}
           `}
         >
-          {showToolbar ? <X size={16} /> : <Settings2 size={16} />}
+          {showToolbar ? <X size={14} /> : <Settings2 size={14} />}
         </button>
       </div>
       
@@ -252,15 +277,16 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, users, onDragStart, on
       <textarea
         value={localDesc}
         onChange={(e) => setLocalDesc(e.target.value)}
+        onFocus={handleInteraction}
         onMouseDown={preventDrag}
-        placeholder="Описание (вставьте скриншот CTRL+V)..."
-        rows={Math.max(2, localDesc.split('\n').length)}
-        className="w-full bg-transparent text-sm text-slate-300 whitespace-pre-wrap leading-relaxed mb-3 outline-none border-b border-transparent focus:border-indigo-500 resize-none transition-colors placeholder:text-slate-600 block"
+        placeholder="Описание..."
+        rows={Math.max(1, localDesc.split('\n').length)}
+        className="w-full bg-transparent text-[11px] md:text-sm text-slate-300 whitespace-pre-wrap leading-relaxed mb-2 outline-none border-b border-transparent focus:border-indigo-500 resize-none transition-colors placeholder:text-slate-600 block"
       />
 
       {/* Attachments Preview */}
       {task.attachments && task.attachments.length > 0 && (
-        <div className="flex flex-col gap-2 mb-4">
+        <div className="flex flex-col gap-2 mb-3">
           {task.attachments.map(att => (
             <div key={att.id} className="relative group/media rounded-lg overflow-hidden border border-white/10 bg-black/40">
                <button 
@@ -295,21 +321,21 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, users, onDragStart, on
       )}
 
       {isUploading && (
-        <div className="mb-3 text-xs text-indigo-400 flex items-center gap-2 animate-pulse">
-           <CloudLightning size={12} /> Uploading media...
+        <div className="mb-2 text-[10px] text-indigo-400 flex items-center gap-2 animate-pulse">
+           <CloudLightning size={10} /> Uploading...
         </div>
       )}
 
       {/* Toolbar (Expandable) */}
       {showToolbar && (
-        <div className="mb-4 bg-[#0B0E11] p-3 rounded-lg border border-white/10 animate-fade-in">
+        <div className="mb-3 bg-[#0B0E11] p-2 rounded-lg border border-white/10 animate-fade-in">
            {/* Color Picker */}
-           <div className="flex gap-1 mb-3 pb-2 border-b border-white/10 overflow-x-auto custom-scrollbar">
+           <div className="flex gap-1 mb-2 pb-2 border-b border-white/10 overflow-x-auto custom-scrollbar">
               {ACCENT_COLORS.map(c => (
                  <button
                    key={c}
                    onClick={() => onUpdate({ ...task, color: c })}
-                   className={`w-5 h-5 rounded-full flex-shrink-0 transition-transform hover:scale-125 ${task.color === c ? 'ring-2 ring-white scale-110' : ''}`}
+                   className={`w-4 h-4 md:w-5 md:h-5 rounded-full flex-shrink-0 transition-transform hover:scale-125 ${task.color === c ? 'ring-2 ring-white scale-110' : ''}`}
                    style={{ backgroundColor: c }}
                  />
               ))}
@@ -319,18 +345,18 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, users, onDragStart, on
             <div className="flex flex-wrap gap-2 items-center">
                <button 
                 onClick={toggleVoiceInput}
-                className={`p-1.5 rounded bg-white/5 hover:bg-white/10 transition-colors ${isListening ? 'text-red-500 animate-pulse' : 'text-slate-400'}`}
+                className={`p-1 rounded bg-white/5 hover:bg-white/10 transition-colors ${isListening ? 'text-red-500 animate-pulse' : 'text-slate-400'}`}
                 title="Голосовой ввод"
               >
-                <Mic size={16} />
+                <Mic size={14} />
               </button>
 
               <button 
                 onClick={() => fileInputRef.current?.click()}
-                className="p-1.5 rounded bg-white/5 hover:bg-white/10 text-slate-400 transition-colors"
+                className="p-1 rounded bg-white/5 hover:bg-white/10 text-slate-400 transition-colors"
                 title="Прикрепить файл"
               >
-                <Paperclip size={16} />
+                <Paperclip size={14} />
               </button>
               <input 
                 type="file" 
@@ -343,17 +369,17 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, users, onDragStart, on
               <button
                 onClick={handleAskAi}
                 disabled={isAiThinking}
-                className="text-xs flex items-center gap-1.5 text-indigo-400 font-bold hover:text-indigo-300 transition-colors bg-indigo-500/10 px-3 py-1.5 rounded-full ml-auto"
+                className="text-[9px] md:text-xs flex items-center gap-1 text-indigo-400 font-bold hover:text-indigo-300 transition-colors bg-indigo-500/10 px-2 py-1 rounded-full ml-auto"
               >
-                <Sparkles size={14} className={isAiThinking ? "animate-spin" : ""} />
-                {isAiThinking ? "Думаю..." : "AI Improve"}
+                <Sparkles size={10} className={isAiThinking ? "animate-spin" : ""} />
+                {isAiThinking ? "Thinking..." : "AI Fix"}
               </button>
             </div>
 
             {/* Emojis */}
-            <div className="flex gap-1 mt-3 justify-between">
+            <div className="flex gap-1 mt-2 justify-between">
               {QUICK_EMOJIS.map(emoji => (
-                <button key={emoji} onClick={() => insertEmoji(emoji)} className="hover:bg-white/10 rounded px-1 text-sm transition-colors">
+                <button key={emoji} onClick={() => insertEmoji(emoji)} className="hover:bg-white/10 rounded px-0.5 text-sm transition-colors">
                   {emoji}
                 </button>
               ))}
@@ -362,46 +388,46 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, users, onDragStart, on
       )}
       
       {/* Footer */}
-      <div className="flex justify-between items-center pt-2 border-t border-white/5 min-h-[32px]">
+      <div className="flex justify-between items-center pt-2 border-t border-white/5 min-h-[24px]">
          
-         <div className="flex items-center gap-2">
+         <div className="flex items-center gap-1.5">
             {isDirty ? (
               <div className="flex items-center gap-2 animate-fade-in">
                  <button 
                    onClick={handleSave} 
-                   className="bg-emerald-500 hover:bg-emerald-400 text-white px-2 py-0.5 rounded text-xs font-bold flex items-center gap-1 shadow-lg shadow-emerald-500/20 transition-all active:scale-95"
+                   className="bg-emerald-500 hover:bg-emerald-400 text-white px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 shadow-lg shadow-emerald-500/20 transition-all active:scale-95"
                  >
-                   <Check size={12} /> Save
+                   <Check size={10} /> Save
                  </button>
                  <button 
                    onClick={handleCancel}
-                   className="bg-white/10 hover:bg-white/20 text-slate-300 px-2 py-0.5 rounded text-xs flex items-center gap-1 transition-all active:scale-95"
+                   className="bg-white/10 hover:bg-white/20 text-slate-300 px-2 py-0.5 rounded text-[10px] flex items-center gap-1 transition-all active:scale-95"
                  >
-                   <RotateCcw size={12} /> Cancel
+                   <RotateCcw size={10} /> No
                  </button>
               </div>
             ) : (
               <>
                 {editorAvatars.length > 0 && (
-                  <div className="flex -space-x-2 mr-2">
+                  <div className="flex -space-x-1.5 mr-1">
                     {editorAvatars.map((user, idx) => (
                       <img 
                         key={`${task.id}-editor-${idx}`} 
                         src={user?.image} 
                         alt={user?.name}
                         title={`Edited by ${user?.name}`}
-                        className="w-5 h-5 rounded-full border border-[#151B21] object-cover"
+                        className="w-4 h-4 rounded-full border border-[#151B21] object-cover"
                       />
                     ))}
                   </div>
                 )}
 
-                <span className="text-[10px] text-slate-500 font-mono">
-                  {new Date(task.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                <span className="text-[9px] md:text-[10px] text-slate-500 font-mono">
+                  {new Date(task.createdAt).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' })}
                 </span>
                 {task.attachments?.length ? (
-                  <span className="text-[10px] bg-white/10 px-1.5 py-0.5 rounded text-slate-300 flex items-center gap-1">
-                    <Paperclip size={10} /> {task.attachments.length}
+                  <span className="text-[9px] bg-white/10 px-1 py-0 rounded text-slate-300 flex items-center gap-1">
+                    <Paperclip size={8} /> {task.attachments.length}
                   </span>
                 ) : null}
               </>
@@ -409,13 +435,13 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, users, onDragStart, on
          </div>
 
          {!isDirty && (
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-0.5">
             {onMoveLeft && (
               <button 
                 onClick={(e) => { e.stopPropagation(); onMoveLeft(); }}
                 className="text-slate-600 hover:text-indigo-400 hover:bg-white/5 p-1 rounded transition-colors"
               >
-                <ChevronLeft size={16} />
+                <ChevronLeft size={14} />
               </button>
             )}
             
@@ -424,17 +450,17 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, users, onDragStart, on
                 onClick={(e) => { e.stopPropagation(); onMoveRight(); }}
                 className="text-slate-600 hover:text-indigo-400 hover:bg-white/5 p-1 rounded transition-colors"
               >
-                <ChevronRight size={16} />
+                <ChevronRight size={14} />
               </button>
             )}
 
-            <div className="w-[1px] h-4 bg-white/10 mx-1"></div>
+            <div className="w-[1px] h-3 bg-white/10 mx-1"></div>
 
             <button 
               onClick={() => onDelete(task.id)}
               className="text-slate-600 hover:text-red-400 hover:bg-white/5 p-1 rounded transition-all hover:rotate-12"
             >
-              <Trash2 size={16} />
+              <Trash2 size={12} />
             </button>
           </div>
          )}
