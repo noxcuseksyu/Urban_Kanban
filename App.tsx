@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Column } from './components/Column';
 import { Task, ColumnId, User, UserPresence } from './types';
-import { Plus, RefreshCw, Server, LogOut, Wifi, WifiOff, Database, Settings, Share2, Check, UploadCloud } from 'lucide-react';
+import { Plus, RefreshCw, Server, LogOut, Wifi, WifiOff, Database, Settings, Share2, Check, UploadCloud, Snowflake } from 'lucide-react';
 import { InstallBanner } from './components/InstallBanner';
 import { LoginScreen } from './components/LoginScreen';
 import { apiService } from './services/api';
 import { SettingsModal } from './components/SettingsModal';
+import { SnowEffect } from './components/SnowEffect';
 
 // USER DATA DEFINITION
 const USERS: User[] = [
@@ -75,6 +76,7 @@ const App: React.FC = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0); 
   const [linkCopied, setLinkCopied] = useState(false);
+  const [isSnowing, setIsSnowing] = useState(() => localStorage.getItem('urban_snow') === 'true');
   
   // PRESENCE STATE
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
@@ -82,6 +84,7 @@ const App: React.FC = () => {
 
   // Ref to prevent overwrite loops
   const tasksRef = useRef(tasks);
+  const lastSaveTimeRef = useRef(0);
   
   const handleLogin = (user: User) => {
     localStorage.setItem('urban_user', JSON.stringify(user));
@@ -94,9 +97,15 @@ const App: React.FC = () => {
   };
 
   const handleShare = () => {
-    navigator.clipboard.writeText(window.location.href);
+    navigator.clipboard.writeText('https://urban-kanban-678150491980.us-west1.run.app');
     setLinkCopied(true);
     setTimeout(() => setLinkCopied(false), 2000);
+  };
+
+  const toggleSnow = () => {
+    const newState = !isSnowing;
+    setIsSnowing(newState);
+    localStorage.setItem('urban_snow', String(newState));
   };
   
   // Keep ref updated
@@ -174,6 +183,12 @@ const App: React.FC = () => {
         
         // 2. Update Tasks if changed (Collaboration)
         if (JSON.stringify(serverData.tasks) !== JSON.stringify(tasksRef.current)) {
+           // Grace Period: Don't overwrite if we saved recently (prevent race condition)
+           if (Date.now() - lastSaveTimeRef.current < 5000) {
+             console.log("Skipping sync: Recently saved");
+             return;
+           }
+
            if (serverData.tasks.length > 0) {
               setTasks(serverData.tasks);
            }
@@ -181,18 +196,6 @@ const App: React.FC = () => {
 
         // 3. Update Presence State (for UI)
         setOnlinePresence(serverData.presence);
-        
-        // 4. Send OUR heartbeat (Update presence without changing tasks)
-        // We do this by calling saveBoardState with current tasks
-        // BUT to avoid "spamming" tasks PUT, we ideally need a lightweight endpoint.
-        // Since we only have one endpoint, we just sync.
-        // To save bandwidth/conflicts, we could only push if tasks changed OR it's been > 10s.
-        // For now, let's piggyback on the polling.
-        
-        // Actually, we can't just GET. We must PUT to update our "LastSeen".
-        // But doing a PUT every 4s is heavy.
-        // Let's rely on the separate SAVE effect for tasks, and maybe a slower heartbeat for pure presence?
-        // OR: Just merge logic here.
         
         setIsOnline(true);
       } catch (e) {
@@ -216,6 +219,7 @@ const App: React.FC = () => {
              viewingTaskId: activeTaskId
            };
            await apiService.saveBoardState(tasks, myPresence);
+           lastSaveTimeRef.current = Date.now(); // Mark save time
            setIsOnline(true);
         } catch (e) {
            setIsOnline(false);
@@ -244,7 +248,8 @@ const App: React.FC = () => {
       color: partialTask.color || getRandomColor(),
       createdAt: Date.now(),
       attachments: [],
-      editors: [currentUser.id]
+      editors: [currentUser.id],
+      cardStyle: 'minimal' // Default style
     };
     setTasks(prev => [...prev, newTask]);
     setActiveTaskId(newTask.id); // Auto-focus new task
@@ -279,6 +284,7 @@ const App: React.FC = () => {
             lastSeen: Date.now(),
             viewingTaskId: activeTaskId
         });
+        lastSaveTimeRef.current = Date.now();
         alert("Server Forced Updated!");
      } catch(e) {
         alert("Error pushing");
@@ -323,10 +329,11 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen text-slate-200 font-sans selection:bg-indigo-500/30 animate-fade-in">
-      <div className="flex flex-col h-screen">
+      {isSnowing && <SnowEffect />}
+      <div className="flex flex-col h-screen relative z-10">
         
         {/* Navbar */}
-        <header className="px-3 py-2 md:px-6 md:py-4 flex items-center justify-between border-b border-white/5 sticky top-0 z-50 backdrop-blur-md bg-[#0B0E11]/30">
+        <header className="px-3 py-2 md:px-6 md:py-4 flex items-center justify-between border-b border-white/5 sticky top-0 z-50 backdrop-blur-md bg-[#050505]/70">
           <div className="flex items-center gap-2 md:gap-3">
             <div className="relative group">
                <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-xl opacity-20 blur-sm group-hover:opacity-40 transition duration-500"></div>
@@ -367,6 +374,14 @@ const App: React.FC = () => {
                    <span className="flex items-center gap-1 text-slate-500"><WifiOff size={10}/> Offline</span>
                 )}
              </div>
+
+             <button 
+                onClick={toggleSnow}
+                className={`transition-colors p-1.5 rounded-lg border border-white/5 ${isSnowing ? 'bg-indigo-500/20 text-indigo-400 shadow-[0_0_10px_rgba(99,102,241,0.3)]' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
+                title="Toggle Snow Mode"
+             >
+                <Snowflake size={18} className={isSnowing ? 'animate-pulse' : ''} />
+             </button>
 
             <button 
                 onClick={handleShare}

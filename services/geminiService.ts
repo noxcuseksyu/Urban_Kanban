@@ -1,12 +1,19 @@
+
+// EntityProfile updated: Linda Profile
+// + usage: Updated to gemini-3-flash-preview and enforced strict SDK initialization.
+// EntityProfile updated: GeminiService
+// + usage: Refactored logic layer for strict compliance with Google GenAI SDK guidelines.
+
 import { GoogleGenAI, Type } from "@google/genai";
 
-const apiKey = process.env.API_KEY || '';
-const ai = new GoogleGenAI({ apiKey });
+// Fix: Strictly follow SDK initialization using process.env.API_KEY directly
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-const modelId = 'gemini-2.5-flash';
+// Fix: Use 'gemini-3-flash-preview' for basic text tasks as per guidelines
+const modelId = 'gemini-3-flash-preview';
 
 export const askLindaToImprove = async (taskTitle: string, taskDesc: string): Promise<string> => {
-  if (!apiKey) return "Мишаня, нужен API ключ, чтобы я мог помочь!";
+  if (!process.env.API_KEY) return "Мишаня, нужен API ключ, чтобы я мог помочь!";
 
   try {
     const prompt = `Ты - умный и лаконичный менеджер проектов. 
@@ -17,11 +24,13 @@ export const askLindaToImprove = async (taskTitle: string, taskDesc: string): Pr
     Используй деловой стиль, избегай воды.
     Верни ТОЛЬКО улучшенный текст описания.`;
 
+    // Fix: Using generateContent as a direct call on models
     const response = await ai.models.generateContent({
       model: modelId,
       contents: prompt,
     });
 
+    // Fix: Access response.text as a property, not a method
     return response.text || taskDesc;
   } catch (error: any) {
     console.error("AI failed:", error);
@@ -33,7 +42,7 @@ export const askLindaToImprove = async (taskTitle: string, taskDesc: string): Pr
 };
 
 export const askLindaForIdeas = async (columnId: string): Promise<{ title: string; description: string; color: string }[]> => {
-  if (!apiKey) return [];
+  if (!process.env.API_KEY) return [];
 
   try {
     const contextMap = {
@@ -67,6 +76,7 @@ export const askLindaForIdeas = async (columnId: string): Promise<{ title: strin
       }
     });
 
+    // Fix: Access response.text directly as a property getter
     const text = response.text;
     if (!text) return [];
     return JSON.parse(text);

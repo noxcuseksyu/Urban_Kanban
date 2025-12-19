@@ -1,7 +1,11 @@
+
+// EntityProfile updated: Column Profile
+// + usage: Fixed type safety in getViewersForTask by explicitly casting presence values to UserPresence.
+
 import React from 'react';
 import { Task, ColumnId, User, UserPresence } from '../types';
 import { TaskCard } from './TaskCard';
-import { Plus, BrainCircuit, MoreHorizontal } from 'lucide-react';
+import { Plus, MoreHorizontal } from 'lucide-react';
 import { askLindaForIdeas } from '../services/geminiService';
 
 interface ColumnProps {
@@ -71,9 +75,8 @@ export const Column: React.FC<ColumnProps> = ({
   // Calculate Active Viewers per task
   const getViewersForTask = (taskId: string) => {
     const viewerIds: number[] = [];
-    Object.values(presence).forEach(p => {
-       // Check if user is viewing THIS task AND is currently online (last 30s)
-       // AND is not the current user (we know we are looking at it)
+    // Fix: Explicitly cast presence values to UserPresence to resolve property 'unknown' errors
+    (Object.values(presence) as UserPresence[]).forEach(p => {
        if (p.viewingTaskId === taskId && 
            Date.now() - p.lastSeen < 30000 &&
            p.userId !== currentUser.id) {
@@ -98,14 +101,15 @@ export const Column: React.FC<ColumnProps> = ({
           <button 
             onClick={handleBrainstorm}
             disabled={isBrainstorming}
-            className="p-1 md:p-1.5 rounded hover:bg-white/5 text-slate-500 hover:text-indigo-400 transition-colors"
+            className="p-1 md:p-1.5 rounded hover:bg-white/5 text-slate-500 hover:text-indigo-400 transition-colors icon-hover-spin"
             title="Generate ideas with AI"
           >
-            <BrainCircuit size={14} className={isBrainstorming ? "animate-pulse" : ""} />
+             {/* AI Icon Replacement */}
+             <span className={`text-lg leading-none ${isBrainstorming ? "animate-spin block" : ""}`}>✨</span>
           </button>
           <button 
             onClick={() => onAddTask(id, {})}
-            className="p-1 md:p-1.5 rounded hover:bg-white/5 text-slate-500 hover:text-white transition-colors"
+            className="p-1 md:p-1.5 rounded hover:bg-white/5 text-slate-500 hover:text-white transition-colors icon-hover-wiggle"
           >
             <Plus size={14} />
           </button>
@@ -116,11 +120,12 @@ export const Column: React.FC<ColumnProps> = ({
       </div>
 
       <div className="flex-1 overflow-y-auto pr-1 md:pr-2 custom-scrollbar">
-        {tasks.map(task => {
+        {tasks.map((task, index) => {
           const { onMoveLeft, onMoveRight } = getMoveHandlers(task.id);
           return (
             <TaskCard 
               key={task.id} 
+              index={index} // Pass index for staggered animation
               task={task} 
               users={users}
               viewers={getViewersForTask(task.id)}

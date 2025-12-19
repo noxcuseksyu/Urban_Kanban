@@ -16,6 +16,7 @@ export interface Task {
   createdAt: number;
   attachments: Attachment[];
   editors?: number[]; // IDs of users who edited this task
+  cardStyle?: 'minimal' | 'filled'; // New styling option
 }
 
 export interface UserPresence {
